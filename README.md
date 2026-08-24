@@ -1,24 +1,50 @@
 # Manta Academy actions
 
-Automatisation réutilisable des sujets Reef. Un dépôt créé depuis
-`subject-template` publie son propre site sur sa branche `gh-pages` à chaque
-push sur `main`. Aucun dépôt supplémentaire, GitHub App ou secret n'est requis.
+This repository contains reusable GitHub Actions workflows for Manta Academy.
+Its Reef deployment workflow lets a repository created from `subject-template`
+publish its own website to its `gh-pages` branch on every push to `main`.
 
-## Workflow
+No additional repository, GitHub App, or custom secret is required.
 
-`reef-deploy.yml` :
+## Reef deployment workflow
 
-1. vérifie que l'auteur possède un droit d'écriture lorsque le dépôt appartient
-   à une organisation ;
-2. récupère `reef-site-template` comme base de build ;
-3. copie les sujets, assets et outils ;
-4. construit le site avec Bun 1.4 ;
-5. remplace la branche `gh-pages` du dépôt source.
+[`reef-deploy.yml`](./.github/workflows/reef-deploy.yml):
 
-Le dépôt doit autoriser les workflows en lecture/écriture et GitHub Pages doit
-être configuré sur **Deploy from a branch**, branche `gh-pages`, dossier `/`.
+1. verifies that the triggering actor has write access when the source belongs
+   to an organization;
+2. checks out `reef-site-template` as the build application;
+3. checks out the Reef layer and the synchronization script;
+4. copies the subject Markdown, assets, and tools;
+5. installs and builds the site with Bun 1.4;
+6. replaces the source repository's `gh-pages` branch with the generated site.
 
-## Contrat `metadata.yml`
+The source repository must grant workflows read and write access. GitHub Pages
+must use **Deploy from a branch**, with the `gh-pages` branch and the `/` folder.
+
+## Calling the workflow
+
+Subject repositories normally inherit this file from `subject-template`:
+
+```yaml
+name: Deploy Reef site
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    uses: MEA-RUN/actions/.github/workflows/reef-deploy.yml@main
+```
+
+## `metadata.yml` contract
+
+Remote tools are downloaded from public GitHub repositories. Local tools are
+copied from the subject repository:
 
 ```yaml
 tools:
@@ -26,12 +52,17 @@ tools:
     repository: MEA-RUN/match
     ref: main
 
-  - id: mon-outil
-    path: tools/mon-outil
-    name: Mon outil
+  - id: my-tool
+    path: tools/my-tool
+    name: My tool
 ```
 
-Un outil distant doit être public et `ref` accepte une branche, un tag ou un
-SHA. Un outil local est un dossier du dépôt contenant au minimum `index.html`.
-Dans les deux cas, `public/tools` est entièrement reconstruit à chaque build.
-Reusable GitHub Actions for MEA-RUN projects
+For a remote tool, `ref` may be a branch, tag, or commit SHA. A local tool
+directory must contain at least an `index.html` file. In both cases,
+`public/tools` is rebuilt from scratch during every deployment.
+
+## Organization repositories
+
+For repositories owned by an organization, deployment stops unless the actor
+has `write`, `maintain`, or `admin` permission. Pull requests from forks cannot
+publish until their changes are reviewed and merged into `main`.
