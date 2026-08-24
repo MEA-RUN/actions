@@ -48,6 +48,13 @@ jobs:
           ref: main
           path: site
 
+      - name: Checkout Reef module
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: MEA-RUN/reef
+          ref: main
+          path: reef
+
       - name: Checkout automation
         uses: actions/checkout@v7.0.1
         with:
