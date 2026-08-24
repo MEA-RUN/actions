@@ -53,7 +53,7 @@ jobs:
         with:
           repository: MEA-RUN/reef
           ref: main
-          path: reef
+          path: site/reef
 
       - name: Checkout automation
         uses: actions/checkout@v7.0.1
