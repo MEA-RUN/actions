@@ -1,0 +1,91 @@
+name: Create Reef site
+
+on:
+  workflow_call:
+    inputs:
+      site_repository:
+        description: Generated repository name
+        required: false
+        type: string
+        default: ''
+    secrets:
+      REEF_APP_CLIENT_ID:
+        required: true
+      REEF_APP_PRIVATE_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.REEF_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REEF_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-administration: write
+          permission-contents: write
+          permission-metadata: read
+
+      - name: Create repository and request initial sync
+        uses: actions/github-script@v9.0.0
+        env:
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.sha }}
+          REQUESTED_SITE_REPOSITORY: ${{ inputs.site_repository }}
+          TEMPLATE_REPOSITORY: MEA-RUN/reef-site-template
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const [owner, sourceName] = process.env.SOURCE_REPOSITORY.split('/')
+            const [templateOwner, templateRepo] = process.env.TEMPLATE_REPOSITORY.split('/')
+            const repo = process.env.REQUESTED_SITE_REPOSITORY || `${sourceName}-site`
+
+            if (!/^[a-zA-Z0-9._-]+$/.test(repo)) {
+              core.setFailed(`Invalid generated repository name: ${repo}`)
+              return
+            }
+
+            try {
+              await github.rest.repos.get({ owner, repo })
+              core.info(`${owner}/${repo} already exists; requesting a full sync`)
+            } catch (error) {
+              if (error.status !== 404) throw error
+
+              await github.request('POST /repos/{template_owner}/{template_repo}/generate', {
+                template_owner: templateOwner,
+                template_repo: templateRepo,
+                owner,
+                name: repo,
+                description: `Generated Reef site for ${process.env.SOURCE_REPOSITORY}`,
+                include_all_branches: false,
+                private: false,
+              })
+              core.info(`Created ${owner}/${repo}`)
+            }
+
+            const payload = {
+              event_type: 'reef-create',
+              client_payload: {
+                source_repository: process.env.SOURCE_REPOSITORY,
+                source_sha: process.env.SOURCE_SHA,
+                mode: 'all',
+              },
+            }
+
+            for (let attempt = 1; attempt <= 6; attempt++) {
+              try {
+                await github.rest.repos.createDispatchEvent({ owner, repo, ...payload })
+                core.info(`Initial sync requested for ${owner}/${repo}`)
+                return
+              } catch (error) {
+                if (attempt === 6 || ![404, 409, 422].includes(error.status)) throw error
+                core.info(`Workflow not ready yet (attempt ${attempt}/6)`)
+                await new Promise(resolve => setTimeout(resolve, 5000))
+              }
+            }
