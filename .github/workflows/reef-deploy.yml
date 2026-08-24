@@ -1,0 +1,106 @@
+name: Deploy Reef site
+
+on:
+  workflow_call:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: reef-pages-${{ github.repository }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify organization publisher
+        uses: actions/github-script@v9.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo
+            const { data: repository } = await github.rest.repos.get({ owner, repo })
+
+            if (repository.owner.type !== 'Organization') {
+              core.info('Personal repository: the push permission on main is sufficient')
+              return
+            }
+
+            const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner,
+              repo,
+              username: context.actor,
+            })
+            const allowed = ['admin', 'maintain', 'write']
+            if (!allowed.includes(data.permission)) {
+              core.setFailed(`${context.actor} cannot publish gh-pages (permission: ${data.permission})`)
+            }
+
+      - name: Checkout subject
+        uses: actions/checkout@v7.0.1
+        with:
+          path: source
+
+      - name: Checkout Reef site base
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: MEA-RUN/reef-site-template
+          ref: main
+          path: site
+
+      - name: Checkout automation
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: MEA-RUN/actions
+          ref: main
+          path: automation
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: 1.4.0
+
+      - name: Synchronize subjects, assets and tools
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun automation/scripts/sync.ts all site source "${{ github.repository }}"
+
+      - name: Install dependencies
+        working-directory: site
+        run: bun install --frozen-lockfile
+
+      - name: Resolve GitHub Pages paths
+        id: pages
+        shell: bash
+        run: |
+          owner="${GITHUB_REPOSITORY%%/*}"
+          repository="${GITHUB_REPOSITORY#*/}"
+          if [[ "$repository" == "$owner.github.io" ]]; then
+            echo "base_url=/" >> "$GITHUB_OUTPUT"
+          else
+            echo "base_url=/$repository/" >> "$GITHUB_OUTPUT"
+          fi
+          echo "site_url=https://$owner.github.io" >> "$GITHUB_OUTPUT"
+
+      - name: Build site
+        working-directory: site
+        env:
+          NUXT_APP_BASE_URL: ${{ steps.pages.outputs.base_url }}
+          NUXT_SITE_URL: ${{ steps.pages.outputs.site_url }}
+          REEF_SOURCE_REPOSITORY: ${{ github.repository }}
+        run: bun run build
+
+      - name: Publish gh-pages
+        working-directory: site/.output/public
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          touch .nojekyll
+          gh auth setup-git
+          git init -b gh-pages
+          git config user.name "reef-bot"
+          git config user.email "reef-bot@users.noreply.github.com"
+          git add --all
+          git commit -m "Deploy $GITHUB_SHA"
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          git push --force origin gh-pages
