@@ -67,7 +67,17 @@ jobs:
 
       - name: Install dependencies
         working-directory: site
-        run: bun install --frozen-lockfile
+        run: |
+          for attempt in 1 2 3; do
+            if bun install --frozen-lockfile; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit 1
+            fi
+            echo "Dependency installation failed (attempt $attempt/3); retrying..."
+            sleep 5
+          done
 
       - name: Resolve GitHub Pages paths
         id: pages
